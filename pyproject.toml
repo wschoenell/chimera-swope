@@ -1,5 +1,5 @@
 [project]
-name = "chimera-template"
+name = "chimera-swope"
 version = "0.1.0"
 description = "Template for chimera plugins"
 license = "GPL-2.0-or-later"
@@ -11,6 +11,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chimera",
+    "nicegui>=2.24.2",
+    "photutils>=2.3.0",
+    "pywebview>=6.0",
+    "swope",
 ]
 [build-system]
 requires = ["hatchling"]
@@ -20,4 +24,8 @@ select = ["N802", "N803"]
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = "(?i)# SPDX-FileCopyrightText:\\s\\d{4}(-(\\d{4}|present))*"
+
+[tool.uv.sources]
+chimera = { path = "../chimera" }
+swope = { git = "https://github.com/carnegie-observatories/swope-python" }
 

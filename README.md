@@ -61,3 +61,9 @@ https://groups.google.com/forum/#!forum/chimera-discuss
 
 Bug reports and patches are welcome and can be sent over our GitHub page:
 https://github.com/astroufsc/chimera-template/
+
+
+
+Swope     26003 obs1   15u  IPv4 0xac6c64aa1d44de8b      0t0  TCP 10.8.80.8:51896->10.8.80.103:51203 (ESTABLISHED)
+GALIL (swope-imb) Swope     26003 obs1   20u  IPv4 0xac6c64aa1917f52b      0t0  TCP 10.8.80.8:51897->10.8.80.60:2003 (ESTABLISHED)
+TCS Swope     26003 obs1   21u  IPv4 0xac6c64aa0ed8490b      0t0  TCP 10.8.80.8:51900->10.8.80.53:50000 (ESTABLISHED)
