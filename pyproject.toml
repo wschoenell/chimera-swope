@@ -11,7 +11,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chimera",
-    "nicegui>=2.24.2",
+    "henrietta",
+    "matplotlib>=3.10.7",
+    "nicegui>=3.2.0",
     "photutils>=2.3.0",
     "pywebview>=6.0",
     "swope",
@@ -28,4 +30,5 @@ notice-rgx = "(?i)# SPDX-FileCopyrightText:\\s\\d{4}(-(\\d{4}|present))*"
 [tool.uv.sources]
 chimera = { path = "../chimera" }
 swope = { git = "https://github.com/carnegie-observatories/swope-python" }
+henrietta = { path = "../../henrietta-python" }
 

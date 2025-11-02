@@ -1,0 +1,46 @@
+# Henrietta observing sequence example
+programs:
+
+    -   program:
+        name: {{ observation.program_name }}
+        pi: {{ observation.pi_name }}
+        priority: {{ observation.priority | default(1) }}
+
+        # Add actions in the order they are intended to be performed.
+        actions:
+            -   action: point
+                ra: {{ observation.target.ra }}
+                dec: {{ observation.target.dec }}
+                position_angle: {{ observation.target.pa | default(0) }}
+                epoch: "{{ observation.target.epoch | default("J2000") }}"
+                {% if observation.target.offsets is defined %}offset:{% endif %}
+                    {% if observation.target.offsets.south is defined %} south: {{ observation.target.offsets.south | default(0) }} # arcsec {% endif %}
+                    {% if observation.target.offsets.east is defined %} east: {{ observation.target.offsets.east | default(0) }} # arcsec {% endif %}
+                    {% if observation.target.offsets.north is defined %} north: {{ observation.target.offsets.north | default(0) }} # arcsec {% endif %}
+                    {% if observation.target.offsets.west is defined %} west: {{ observation.target.offsets.west | default(0) }} # arcsec {% endif %}
+            # Ask the operator to acquire the guide star
+            -   action: operator
+                type: "acquire_guider"
+                msg: "Please acquire the guide star."
+
+            # after pointing, do an acquisition exposure to check pointing
+            -   action: expose
+                filter: V
+                frames: 1
+                exptime: 7
+                image_type: OBJECT
+                object_name: {{ observation.target.name }} acq
+
+            # Ask the operator to align the instrument
+            -   action: operator
+                type: "acquire_instrument"
+                msg: "Please align the instrument."
+
+            # Now do the science exposures
+            -   action: expose
+                filter: B
+                frames: 2
+                exptime: 5
+                image_type: OBJECT
+                object_name: {{ observation.target.name }}
+

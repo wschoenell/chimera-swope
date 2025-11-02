@@ -1,6 +1,6 @@
 from chimera.interfaces.focuser import FocuserAxis
 from chimera.instruments.focuser import FocuserBase
-from time import time
+from chimera.interfaces.focuser import InvalidFocusPositionException
 
 from chimera_swope.instruments.swopebase import SwopeBase
 
@@ -29,10 +29,16 @@ class SwopeFocuser(FocuserBase, SwopeBase):
         return self.status["FocusPos"]
 
     def move_to(self, position, axis=FocuserAxis.Z):
+        limits = self.get_range(axis)
+        if position < limits[0] or position > limits[1]:
+            raise InvalidFocusPositionException(
+                f"Position {position} out of range {limits} for axis {axis}"
+            )
+        print(f"Moving focuser to position {position}")
         return self.tcs.set_focus(position)
 
     def get_range(self, axis=FocuserAxis.Z):
-        return -10, 100  # placeholder values
+        return 20000, 28000
 
     # def get_range(self, axis=FocuserAxis.Z):
     # def get_temperature(self):

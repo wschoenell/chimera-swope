@@ -1,9 +1,16 @@
 from chimera.instruments.dome import DomeBase
 from chimera_swope.instruments.swopebase import SwopeBase
 from swope.tcs.swope_tcs import SwopeDomeShutter
+from chimera.interfaces.dome import Mode
+
 
 class SwopeDome(DomeBase, SwopeBase):
-    __config__ = {"tcs_host": "127.0.0.1"}
+    __config__ = {
+        "tcs_host": "127.0.0.1",
+        "telescope": "/Telescope/0",
+        "mode": Mode.Track,
+        "model": "LCO Swope Dome",
+    }
 
     def __init__(self):
         DomeBase.__init__(self)
@@ -14,39 +21,39 @@ class SwopeDome(DomeBase, SwopeBase):
 
     def open_shutter(self):
         return self.tcs.set_dome_shutter(SwopeDomeShutter.OPEN)
-    
+
     def close_shutter(self):
         return self.tcs.set_dome_shutter(SwopeDomeShutter.CLOSE)
 
     def track(self):
         return self.tcs.set_dome_auto(True)
-    
+
     def stand(self):
         return self.tcs.set_dome_auto(False)
-    
+
     def is_tracking(self):
         self.update_status()
         return self.status["Dome_auto"]
-    
+
     def get_az(self):
         self.update_status()
         return self.status["Dome_az"]
-    
+
+    def slew_to_az(self, az):
+        print("SwopeDome.slew_to_az not implemented")
+        return
+
     def is_slit_open(self):
         return None
         raise NotImplementedError
-    
+
     def is_slewing(self):
         return None
         raise NotImplementedError
-    
-        
-
 
     # def is_shutter_open(self):
     #     self.update_status()
     #     return self.status["Dome_Shutter"] == SwopeDomeShutter.OPEN
-    
 
 
 #     def sync_with_telescope(self):

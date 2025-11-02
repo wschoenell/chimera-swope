@@ -6,7 +6,15 @@ from chimera_swope.instruments.swopebase import SwopeBase
 
 
 class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
-    __config__ = {"tcs_host": "127.0.0.1"}
+    __config__ = {
+        "tcs_host": "127.0.0.1",
+        "model": "Henrietta Swope Telescope",
+        "optics": ["Ritchey-Chretien f/7"],
+        "mount": "Boller and Chivens",
+        "aperture": 1000.0,  # mm
+        "focal_length": 7000.0,  # mm unit (ex., 0.5 for a half length focal reducer)
+        "focal_reduction": 1.0,
+    }
 
     def __init__(self):
         TelescopeBase.__init__(self)
@@ -31,31 +39,31 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     def get_dec(self):
         self.update_status()
         return self.status["Dec_ICRS"]
-    
+
     def get_position_ra_dec(self):
         return self.get_ra(), self.get_dec()
 
     def get_position_alt_az(self):
         return self.get_alt(), self.get_az()
-    
+
     def is_tracking(self):
         self.update_status()
         return self.status["Tracking"]
-    
+
     def is_slewing(self):
         self.update_status()
         return self.status["Slewing"]
-    
+
     def start_tracking(self):
         ret = self.tcs.set_track(True)
         if ret:
-            self.tracking_started() 
+            self.tracking_started()
         return ret
 
     def stop_tracking(self):
         ret = self.tcs.set_track(False)
         if ret:
-            self.tracking_stopped() 
+            self.tracking_stopped()
         return ret
 
     def set_offset(self, ha: float, dec: float):
@@ -82,7 +90,6 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         self.update_status(force=True)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
-
     def slew_to_alt_az(self, alt: float, az: float):
         self.slew_begin(self.get_ra(), self.get_dec(), 2000)
         # TODO slew
@@ -91,7 +98,7 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
 
     def abort_slew(self):
         self.tcs.set_slew_stop()
-    
+
     def is_slewing(self):
         self.update_status()
         return self.status["Slewing"]
@@ -104,11 +111,11 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     #       park_complete()
     # TD def unpark(self):
     #       unpark_complete()
-    
+
     def is_parked(self):
         self.update_status()
         return self.status["Init_done"]
-    
+
     # N def open_cover(self):
     # N def close_cover(self):
     # N def is_cover_open(self):
