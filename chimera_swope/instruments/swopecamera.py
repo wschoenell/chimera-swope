@@ -74,10 +74,23 @@ class SwopeCamera(CameraBase, FilterWheelBase):
 
         status = CameraStatus.OK
 
-        assert self.swope_ccd.exposure_time(image_request["exptime"])
+        assert self.swope_ccd.set_exposure_type(image_request["type"])
+        assert (
+            abs(
+                self.swope_ccd.exposure_time(image_request["exptime"])
+                - image_request["exptime"]
+            )
+            < 1e-6
+        )
         self.__last_frame_start = dt.datetime.now(dt.UTC)
         assert self.swope_ccd.start_exposure()
+        t0 = time.time()
+        readout_started = False
         while self.swope_ccd.is_exposing:
+            if time.time() - t0 > image_request["exptime"] and not readout_started:
+                # exposure complete, start readout - approximate
+                readout_started = True
+                self.readout_begin(image_request)
             time.sleep(0.1)
 
         self.expose_complete(image_request, status)
