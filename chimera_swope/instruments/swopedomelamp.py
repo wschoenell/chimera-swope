@@ -4,7 +4,7 @@ from chimera_swope.instruments.swopebase import SwopeBase
 
 class SwopeDomeLamp(LampBase, SwopeBase):
     __config__ = {"tcs_host": "127.0.0.1"}
-    
+
     def __init__(self):
         LampBase.__init__(self)
         SwopeBase.__init__(self)
@@ -13,9 +13,8 @@ class SwopeDomeLamp(LampBase, SwopeBase):
         SwopeBase.__start__(self)
 
     def is_switched_on(self):
-        self.update_status()
         return self.status["DomeLights"]
-    
+
     def switch_on(self):
         self.tcs.set_domelight(True)
 

@@ -1,3 +1,4 @@
+import time
 from chimera.instruments.telescope import TelescopeBase
 from chimera.interfaces.telescope import TelescopeStatus
 from chimera.instruments.fan import FanBase
@@ -25,19 +26,15 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         SwopeBase.__start__(self)
 
     def get_alt(self):
-        self.update_status()
         return self.status["Alt"]
 
     def get_az(self):
-        self.update_status()
         return self.status["Azi"]
 
     def get_ra(self):
-        self.update_status()
         return self.status["RA_ICRS"]
 
     def get_dec(self):
-        self.update_status()
         return self.status["Dec_ICRS"]
 
     def get_position_ra_dec(self):
@@ -47,11 +44,9 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         return self.get_alt(), self.get_az()
 
     def is_tracking(self):
-        self.update_status()
         return self.status["Tracking"]
 
     def is_slewing(self):
-        self.update_status()
         return self.status["Slewing"]
 
     def start_tracking(self):
@@ -69,7 +64,7 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     def set_offset(self, ha: float, dec: float):
         self.slew_begin(self.get_ra(), self.get_dec())
         self.tcs.set_offset(ha, dec)
-        self.update_status(force=True)
+        self.status(force=True)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
     def move_east(self, offset, rate=None):
@@ -85,22 +80,24 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         self.set_offset(0, -offset)
 
     def slew_to_ra_dec(self, ra: float, dec: float, epoch=None):
-        self.slew_begin(self.get_ra(), self.get_dec(), 2000)
-        # TODO slew
-        self.update_status(force=True)
+        self.slew_begin(self.get_ra(), self.get_dec())  # , 2000)
+        self.tcs.set_nextobj(ra, dec, 2000)
+        self.tcs.set_slew()
+        self.status(force=True)
+        while self.is_slewing():
+            time.sleep(0.01)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
     def slew_to_alt_az(self, alt: float, az: float):
         self.slew_begin(self.get_ra(), self.get_dec(), 2000)
         # TODO slew
-        self.update_status(force=True)
+        self.status(force=True)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
     def abort_slew(self):
         self.tcs.set_slew_stop()
 
     def is_slewing(self):
-        self.update_status()
         return self.status["Slewing"]
 
     # TD def get_target_ra_dec(self):
@@ -109,11 +106,10 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     #           sync_complete(self, ra: float, dec: float)
     # TD def park(self):
     #       park_complete()
-    # TD def unpark(self):
-    #       unpark_complete()
+    def unpark(self):
+        self.tcs.set_poweron(True)
 
     def is_parked(self):
-        self.update_status()
         return self.status["Init_done"]
 
     # N def open_cover(self):

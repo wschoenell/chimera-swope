@@ -8,6 +8,7 @@ programs:
 
         # Add actions in the order they are intended to be performed.
         actions:
+            # Point the telescope to the target
             -   action: point
                 ra: {{ observation.target.ra }}
                 dec: {{ observation.target.dec }}
@@ -18,10 +19,15 @@ programs:
                     {% if observation.target.offsets.east is defined %} east: {{ observation.target.offsets.east | default(0) }} # arcsec {% endif %}
                     {% if observation.target.offsets.north is defined %} north: {{ observation.target.offsets.north | default(0) }} # arcsec {% endif %}
                     {% if observation.target.offsets.west is defined %} west: {{ observation.target.offsets.west | default(0) }} # arcsec {% endif %}
-            # Ask the operator to acquire the guide star
-            -   action: operator
-                type: "acquire_guider"
-                msg: "Please acquire the guide star."
+            
+            # Correct focusing if needed
+            -   action: autofocus
+                filter: "V"
+                use_model: true
+
+            # Start guiding by acquiring a guide star
+            -   action: autoguider
+                acquire: true
 
             # after pointing, do an acquisition exposure to check pointing
             -   action: expose

@@ -13,19 +13,22 @@ class SwopeFocuser(FocuserBase, SwopeBase):
         FocuserBase.__init__(self)
         SwopeBase.__init__(self)
         self.tcs = None
-        self.status = None
+        self._status = None
         self._last_update = None
         self._update_interval = 1.0  # seconds
 
     def __start__(self):
         SwopeBase.__start__(self)
 
-    # def move_in(self, n, axis=FocuserAxis.Z):
+    def move_in(self, n, axis=FocuserAxis.Z):
+        current_pos = self.get_position(axis)
+        return self.move_to(current_pos - n, axis)
 
-    # def move_out(self, n, axis=FocuserAxis.Z):
-    # def move_to(self, position, axis=FocuserAxis.Z):
+    def move_out(self, n, axis=FocuserAxis.Z):
+        current_pos = self.get_position(axis)
+        return self.move_to(current_pos + n, axis)
+
     def get_position(self, axis=FocuserAxis.Z):
-        self.update_status()
         return self.status["FocusPos"]
 
     def move_to(self, position, axis=FocuserAxis.Z):
@@ -40,8 +43,5 @@ class SwopeFocuser(FocuserBase, SwopeBase):
     def get_range(self, axis=FocuserAxis.Z):
         return 20000, 28000
 
-    # def get_range(self, axis=FocuserAxis.Z):
     # def get_temperature(self):
-    # def supports(self, feature=None):
-    # def _check_axis(self, axis):
     # def get_metadata(self, request):

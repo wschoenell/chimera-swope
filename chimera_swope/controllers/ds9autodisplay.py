@@ -1,7 +1,6 @@
 # This is an example of an simple instrument.
 
 from chimera.core.chimeraobject import ChimeraObject
-from chimera.core.proxy import Proxy
 from astropy.samp import SAMPIntegratedClient
 from astropy.samp import SAMPHubError
 from chimera.interfaces.camera import CameraStatus
@@ -18,6 +17,7 @@ import numpy as np
 
 class Ds9AutoDisplay(ChimeraObject):
     __config__ = {"camera": "127.0.0.1:6379/FakeCamera/fake"}
+    # __config__ = {"camera": "/Camera/0"}
 
     def __init__(self):
         ChimeraObject.__init__(self)
@@ -58,7 +58,8 @@ class Ds9AutoDisplay(ChimeraObject):
             )
             self.ds9_client.ecall_and_wait("c1", "ds9.set", "10", cmd="zscale")
 
-        cam = Proxy(self["camera"])
+        cam = self.get_proxy(self["camera"])
+        cam.ping()
         cam.readout_complete += ds9_clbk
 
     def get_pa(self, detect_stars=True):
@@ -109,6 +110,14 @@ class Ds9AutoDisplay(ChimeraObject):
 
         (x1, y1), (x2, y2) = pts
         self.update_pa(np.atan2(y2 - y1, x2 - x1) * 180 / np.pi)
+
+    def calculate_offsets(self, ra_east, dec_east, ra_west, dec_west):
+        # 1 - run astrometry.net on the image to get WCS solution
+        # self.image_fname
+        # 2 - convert ra/dec to x/y using WCS
+        # 3 - calculate PA from x/y
+        # 4 - calculate center offset
+        pass
 
     @event
     def update_pa(self, pa):

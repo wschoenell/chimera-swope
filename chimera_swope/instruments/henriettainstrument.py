@@ -34,7 +34,9 @@ class HenriettaWheel(FilterWheelBase):
 
     def __init__(self):
         FilterWheelBase.__init__(self)
-        self.henrietta: Henrietta = Proxy(self["henrietta"])
+
+    def __start__(self):
+        self.henrietta: HenriettaBase = self.get_proxy(self["henrietta"])
 
         # Map class names to their corresponding wheel names and methods
         wheel_mapping = {
@@ -57,7 +59,7 @@ class HenriettaWheel(FilterWheelBase):
         else:
             raise ValueError(f"Unknown wheel class: {class_name}")
 
-    def __start__(self):
+        ###
         if self["filters_gui"] == "":
             self["filters_gui"] = self["filters"]
         return super().__start__()
@@ -107,7 +109,6 @@ class HenriettaCamera(CameraBase):
 
     def __init__(self):
         CameraBase.__init__(self)
-        self.henrietta: Henrietta = Proxy(self["henrietta"])
 
         # TODO: move this out
         from chimera.interfaces.camera import ReadoutMode
@@ -125,6 +126,9 @@ class HenriettaCamera(CameraBase):
         self._readout_modes = {self._my_ccd: {self._my_readout_mode: readout_mode}}
 
         self.supported_features = {CameraFeature.TEMPERATURE_CONTROL: True}
+
+    def __start__(self):
+        self.henrietta: Henrietta = self.get_proxy(self["henrietta"])
 
     def get_current_ccd(self):
         return self._my_ccd
