@@ -19,6 +19,9 @@ dependencies = [
     "swope",
 ]
 
+[project.gui-scripts]
+chimera-ui = "chimera_swope.cli.ui:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
