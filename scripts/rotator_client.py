@@ -5,7 +5,6 @@ from concurrent.futures.thread import ThreadPoolExecutor
 
 from chimera.core.bus import Bus
 from chimera.core.proxy import Proxy
-from chimera.interfaces.telescope import Telescope
 from chimera.util.coord import Coord
 from nicegui import Event, app, run, ui
 from nicegui.events import (
@@ -13,8 +12,6 @@ from nicegui.events import (
     UploadEventArguments,
     ValueChangeEventArguments,
 )
-
-print("Starting rotator client...")
 
 
 class ToggleButton(ui.button):
@@ -37,196 +34,237 @@ class ToggleButton(ui.button):
         super().update()
 
 
-class UiData:
-    current_pa: str = "0.0º"
-    offset_pa: float = 0.0
-    current_ra: float = 0.0
-    current_dec: float = 0.0
-    current_ra_str: str = ""
-    current_dec_str: str = ""
-    current_focus: float = 0.0
-    target_focus: float = 0.0
-    current_rotator: float = 0.0
-    last_update: float = 0.0
+def setup() -> None:
+    """Setup function that initializes all state and defines the UI."""
+
+    # State variables
+    state = {
+        "current_pa": "0.0º",
+        "offset_pa": 0.0,
+        "current_ra": 0.0,
+        "current_dec": 0.0,
+        "current_ra_str": "",
+        "current_dec_str": "",
+        "current_focus": 0.0,
+        "target_focus": 0.0,
+        "current_rotator": 0.0,
+        "last_update": 0.0,
+        "message": None,
+        "aladin": None,
+        "terminal": None,
+        "audio": None,
+        "focus_min": 0,
+        "focus_max": 1,
+    }
 
     tweet = Event[str]()
 
-    def __init__(self):
-        global bus
-        # self.display_proxy = Proxy("tcp://127.0.0.1:6379/Ds9AutoDisplay/display", bus)
-        # self.display_proxy.update_pa += self.update_pa_offset
-        self.rotator_proxy = Proxy("tcp://127.0.0.1:6379/FakeRotator/rotator", bus)
-        self.rotator_proxy.slew_complete += self.update_rotator
-        self.telescope_proxy: Telescope = Proxy(
-            "tcp://127.0.0.1:6379/FakeTelescope/swope", bus
-        )
-        self.telescope_proxy.ping()
-        self.telescope_proxy.slew_complete += self.tel_slew_complete
-        self.focuser_proxy = Proxy("tcp://127.0.0.1:6379/SwopeFocuser/focus", bus)
-        self.focuser_proxy.ping()
-        self.focus_min, self.focus_max = self.focuser_proxy.get_range()
-        print("Focuser range:", self.focus_min, self.focus_max)
+    # Initialize proxies
+    proxies = {
+        "display": None,
+        "rotator": None,
+        "telescope": None,
+        "focuser": None,
+        "operator": None,
+        "dome": None,
+    }
 
-        # self.operator_proxy = Proxy("tcp://127.0.0.1:6379/TelescopeOperator/operator", bus)
-        # self.operator_proxy.notify += self.operator_request
+    # Create bus
+    print("Starting bus...")
+    pool = ThreadPoolExecutor()
+    random_port = random.randint(10000, 60000)
+    bus = Bus(f"tcp://127.0.0.1:{random_port}")
+    pool.submit(bus.run_forever)
 
-        self.message = None
+    # Try to connect to each proxy
+    try:
+        proxies["rotator"] = Proxy("tcp://127.0.0.1:6379/FakeRotator/rotator", bus)
+        proxies["rotator"].ping()
+    except Exception as e:
+        print(f"Could not connect to rotator: {e}")
+        proxies["rotator"] = None
 
-        self.offset_pa = 0.0
-        app.timer(2, self.update_proxy_data)
-        # app.add_static_files("/docs", "docs")  # for aladin
+    try:
+        proxies["telescope"] = Proxy("tcp://127.0.0.1:6379/FakeTelescope/swope", bus)
+        proxies["telescope"].ping()
+    except Exception as e:
+        print(f"Could not connect to telescope: {e}")
+        proxies["telescope"] = None
 
-        self.aladin = None
+    try:
+        proxies["focuser"] = Proxy("tcp://127.0.0.1:6379/SwopeFocuser/focus", bus)
+        proxies["focuser"].ping()
+        state["focus_min"], state["focus_max"] = proxies["focuser"].get_range()
+        print("Focuser range:", state["focus_min"], state["focus_max"])
+    except Exception as e:
+        print(f"Could not connect to focuser: {e}")
+        proxies["focuser"] = None
 
-        self.focus_min = 0
-        self.focus_max = 1
+    # try:
+    #     proxies["display"] = Proxy("tcp://127.0.0.1:6379/Ds9AutoDisplay/display", bus)
+    #     proxies["display"].update_pa += update_pa_offset
+    # except Exception as e:
+    #     print(f"Could not connect to display: {e}")
 
-    # def _start_system(self, options: optparse.Values):
-    #     self.config = ChimeraConfig.from_file(options.config)
-    #     random_port = random.randint(10000, 60000)
-    #     self.bus = Bus(f"tcp://{self.config.host}:{random_port}")
-    # # from CLI end
+    # try:
+    #     proxies["operator"] = Proxy("tcp://127.0.0.1:6379/TelescopeOperator/operator", bus)
+    #     proxies["operator"].notify += operator_request
+    # except Exception as e:
+    #     print(f"Could not connect to operator: {e}")
 
-    # chimera callbacks
-    def tel_slew_complete(self, ra=None, dec=None, status=None):
+    # Telescope methods
+    def tel_slew_complete(ra=None, dec=None, status=None):
         print("Telescope slew complete callback")
-        self.update_aladin(ra, dec)
+        tel_aladin_update(ra, dec)
 
-    #
-
-    def handle_key(self, e: KeyEventArguments):
-        if e.action.keydown:
-            if e.key.arrow_left:
-                ui.notify("Moving West")
-                self.offset_west_btn()
-            elif e.key.arrow_right:
-                ui.notify("Moving East")
-                self.offset_east_btn()
-            elif e.key.arrow_up:
-                ui.notify("Moving North")
-                self.offset_north_btn()
-            elif e.key.arrow_down:
-                ui.notify("Moving South")
-                self.offset_south_btn()
-
-    # data update methods
-    def update_proxy_data(self):
-        if time.time() - self.last_update < 1.0:
+    def tel_update_coordinates():
+        if not proxies["telescope"]:
             return
-        self.last_update = time.time()
-        self.update_telescope_coordinates()
-        self.update_focus()
-        self.update_rotator()
-
-    def update_telescope_coordinates(self):
-        self.current_ra, self.current_dec = self.telescope_proxy.get_position_ra_dec()
+        state["current_ra"], state["current_dec"] = proxies[
+            "telescope"
+        ].get_position_ra_dec()
 
         # fixme: this should not be necessary: chimera bug
-        if not isinstance(self.current_ra, float):
-            self.current_ra = float(self.current_ra.to_d())
-        if not isinstance(self.current_dec, float):
-            self.current_dec = float(self.current_dec.to_d())
+        if not isinstance(state["current_ra"], float):
+            state["current_ra"] = float(state["current_ra"].to_d())
+        if not isinstance(state["current_dec"], float):
+            state["current_dec"] = float(state["current_dec"].to_d())
         # fixme end
 
-        self.current_ra_str = Coord.from_d(float(self.current_ra)).strfcoord()
-        self.current_dec_str = Coord.from_d(float(self.current_dec)).strfcoord()
+        state["current_ra_str"] = Coord.from_d(float(state["current_ra"])).strfcoord()
+        state["current_dec_str"] = Coord.from_d(float(state["current_dec"])).strfcoord()
 
-    # def update_focus(self):
-    #     self.current_focus = 12000  # self.focuser_proxy.get_position()
+    def tel_offset_north():
+        if not proxies["telescope"]:
+            return
+        proxies["telescope"].move_north(1)
+        tel_update_coordinates()
 
-    def update_focus(self):
-        self.current_focus = self.focuser_proxy.get_position()
-        self.current_rotator = self.rotator_proxy.get_position()
-        self.current_pa = f"{self.current_rotator:.3f}º"
+    def tel_offset_south():
+        if not proxies["telescope"]:
+            return
+        proxies["telescope"].move_south(1)
+        tel_update_coordinates()
 
-    def operator_request(self, type, msg):
+    def tel_offset_east():
+        if not proxies["telescope"]:
+            return
+        proxies["telescope"].move_east(1)
+        tel_update_coordinates()
+
+    def tel_offset_west():
+        if not proxies["telescope"]:
+            return
+        proxies["telescope"].move_west(1)
+        tel_update_coordinates()
+
+    # Chimera callbacks
+    if proxies["telescope"]:
+        proxies["telescope"].slew_complete += tel_slew_complete
+
+    def update_rotator(*args, **kwargs):
+        """Callback for rotator slew complete."""
+        pass
+
+    if proxies["rotator"]:
+        proxies["rotator"].slew_complete += update_rotator
+
+    # Data update methods
+    def update_proxy_data():
+        if time.time() - state["last_update"] < 1.0:
+            return
+        state["last_update"] = time.time()
+        tel_update_coordinates()
+        focusser_update()
+
+    def focusser_update():
+        if proxies["focuser"]:
+            state["current_focus"] = proxies["focuser"].get_position()
+        if proxies["rotator"]:
+            state["current_rotator"] = proxies["rotator"].get_position()
+            state["current_pa"] = f"{state['current_rotator']:.3f}º"
+
+    def operator_request(type, msg):
         print(f"xxx Operator request: {type} -- {msg}")
-        self.message = f"Operator request: {type} -- {msg}"
-        self.tweet.emit(self.message)
+        state["message"] = f"Operator request: {type} -- {msg}"
+        tweet.emit(state["message"])
 
-    ###
-
-    def show(self, event: ValueChangeEventArguments):
+    def show(event: ValueChangeEventArguments):
         name = type(event.sender).__name__
         ui.notify(f"{name}: {event.value}")
 
-    def update_pa_offset(self, pa):
+    def rotator_offset_update(pa):
         print("Updating PA offset:", pa)
-        self.offset_pa = pa
+        state["offset_pa"] = pa
 
-    def set_focus_btn(self):
+    def rotator_get_ds9_pa(detect_stars=True):
+        """Get PA from DS9 display - can be run in cpu_bound context."""
+        if not proxies["display"]:
+            try:
+                proxies["display"] = Proxy("127.0.0.1:6379/Ds9AutoDisplay/display", bus)
+            except Exception as e:
+                ui.notify(f"Error connecting to DS9: {e}")
+                return
         try:
-            print(f"Setting focus to {self.target_focus}")
-            self.focuser_proxy.move_to(int(self.target_focus))
+            print(proxies["display"].get_pa(detect_stars=detect_stars))
+        except Exception as e:
+            ui.notify(f"Error getting PA from DS9: {e}")
+            return
+
+    # Button handlers
+    def focuser_set_btn():
+        if not proxies["focuser"]:
+            ui.notify("Focuser not connected")
+            return
+        try:
+            print(f"Setting focus to {state['target_focus']}")
+            proxies["focuser"].move_to(int(state["target_focus"]))
         except Exception as e:
             ui.notify(f"Error setting focus: {e}")
-        self.update_focus()
+        focusser_update()
 
-    def move_btn(self):
-        ui.notify(f"Offsetting rotator by {self.offset_pa:.3f}º")
-        self.rotator_proxy.move_by(self.offset_pa)
-        self.offset_pa = 0.0
-        self.update_pa_offset(self.offset_pa)
-        self.update_rotator()
-
-    def set_pa_offset(self, event: ValueChangeEventArguments):
-        self.offset_pa = float(event.value)
-
-    @staticmethod
-    def get_display_proxy_pa(detect_stars=True):
-        try:
-            global bus
-            display_proxy = Proxy("127.0.0.1:6379/Ds9AutoDisplay/display", bus)
-            print(display_proxy.get_pa(detect_stars=detect_stars))
-        except Exception as e:
-            ui.notify(f"Error getting PA from DS9: {e}")
+    def rotator_move_btn():
+        if not proxies["rotator"]:
+            ui.notify("Rotator not connected")
             return
-        except Exception as e:
-            ui.notify(f"Error getting PA from DS9: {e}")
-            return
+        ui.notify(f"Offsetting rotator by {state['offset_pa']:.3f}º")
+        proxies["rotator"].move_by(state["offset_pa"])
+        state["offset_pa"] = 0.0
+        rotator_offset_update(state["offset_pa"])
 
-        # return self.display_proxy.get_pa(detect_stars=detect_stars)
+    def rotator_set_offset(event: ValueChangeEventArguments):
+        state["offset_pa"] = float(event.value)
 
-    async def grab_stars_btn(self):
+    async def rotator_grab_stars_btn():
         ui.notify("Grabbing PA from DS9")
         print("Grabbing PA from DS9")
-        await run.cpu_bound(self.get_display_proxy_pa, detect_stars=True)
+        await run.cpu_bound(rotator_get_ds9_pa, detect_stars=True)
         ui.notify("Finished grabbing PA from DS9")
 
-    async def grab_pixels_btn(self):
+    async def rotator_grab_pixels_btn():
         ui.notify("Grabbing PA from DS9 (2 points)")
-        await run.cpu_bound(self.get_display_proxy_pa, detect_stars=False)
+        await run.cpu_bound(rotator_get_ds9_pa, detect_stars=False)
         ui.notify("Finished grabbing PA from DS9 (2 points)")
 
-    def offset_north_btn(self):
-        self.telescope_proxy.move_north(1)
-        self.update_telescope_coordinates()
+    def tel_handle_key_input(e: KeyEventArguments):
+        if e.action.keydown:
+            if e.key.arrow_left:
+                ui.notify("Moving West")
+                tel_offset_west()
+            elif e.key.arrow_right:
+                ui.notify("Moving East")
+                tel_offset_east()
+            elif e.key.arrow_up:
+                ui.notify("Moving North")
+                tel_offset_north()
+            elif e.key.arrow_down:
+                ui.notify("Moving South")
+                tel_offset_south()
 
-    def offset_south_btn(self):
-        self.telescope_proxy.move_south(1)
-        self.update_telescope_coordinates()
-
-    def offset_east_btn(self):
-        self.telescope_proxy.move_east(1)
-        self.update_telescope_coordinates()
-
-    def offset_west_btn(self):
-        self.telescope_proxy.move_west(1)
-        self.update_telescope_coordinates()
-
-    async def run_subprocess(self, arg="--help"):
-        # button.disable()
-        self.terminal.clear()
+    async def sched_run_subprocess(arg="--help"):
+        state["terminal"].clear()
         args = arg.split()
         process = await asyncio.create_subprocess_exec(
-            # 'python3', '-u', '-c',
-            # (
-            #     'import time\n'
-            #     'for i in range(5):\n'
-            #     '    print(f"Step {i+1}/5: Processing...")\n'
-            #     '    time.sleep(0.5)\n'
-            #     'print("\\x1b[32m✓ All steps completed!\\x1b[0m")'
-            # ),
             "chimera-sched",
             *args,
             "--config",
@@ -235,163 +273,42 @@ class UiData:
             stderr=asyncio.subprocess.PIPE,
         )
 
-        async def write_to_terminal(stream: asyncio.StreamReader) -> None:
+        async def sched_write_to_terminal(stream: asyncio.StreamReader) -> None:
             while chunk := await stream.read(128):
-                self.terminal.write(chunk)
+                state["terminal"].write(chunk)
 
         await asyncio.gather(
-            write_to_terminal(process.stdout),
-            write_to_terminal(process.stderr),
+            sched_write_to_terminal(process.stdout),
+            sched_write_to_terminal(process.stderr),
             process.wait(),
         )
-        # button.enable()
 
-    async def upload_sched_file(self, e: UploadEventArguments):
+    async def sched_upload(e: UploadEventArguments):
         ui.notify(f"Uploaded {e.file.name}")
         await e.file.save("/tmp/sched.yaml")  # fixme
 
-    def tweet_handler(self, message: str):
-        self.audio.play()
+    def tweet_handler(message: str):
+        state["audio"].play()
         ui.notify(
             f'A Someone tweeted: "{message}"',
             close_button="Release",
             type="warning",
             spinner=True,
             timeout=0,
-        )  # , on_close=self.release_operator)
+        )
         ui.notify(
             f'B Someone tweeted: "{message}"',
             close_button="Release",
             type="warning",
             spinner=True,
             timeout=0,
-        )  # , on_close=self.release_operator)
+        )
 
-    def release_operator(self):
-        self.operator_proxy.release()
+    def release_operator():
+        if proxies["operator"]:
+            proxies["operator"].release()
 
-    def root(self):
-        self.update_proxy_data()
-        keyboard = ui.keyboard(on_key=self.handle_key)
-
-        self.tweet.subscribe(self.tweet_handler)
-        # ui.label().bind_text(self, "message")
-        # ui.notify().bind_text(self, "message")
-
-        with ui.tabs().classes("w-full") as tabs:
-            ui.tab("Telescope")
-            ui.tab("Rotator")
-            ui.tab("Henrietta")
-            ui.tab("Scheduler")
-            ui.tab("Dome")
-            ui.tab("Settings", label="", icon="settings")
-
-        with ui.tab_panels(tabs, value="Telescope", animated=False).classes("w-full"):
-            with ui.tab_panel("Telescope"):
-                with ui.grid(columns=3):
-                    with ui.column():
-                        ui.input("Telescope RA:").bind_value(
-                            self, "current_ra_str"
-                        ).props("readonly")
-                        ui.input("Telescope Dec:").bind_value(
-                            self, "current_dec_str"
-                        ).props("readonly")
-
-                        self.update_focus()
-                        ui.input(
-                            "Focus:",
-                            validation={
-                                "Out of range": lambda v: self.focus_min
-                                <= float(v)
-                                <= self.focus_max
-                            },
-                            on_change=lambda e: setattr(self, "target_focus", e.value),
-                        ).bind_value(self, "current_focus")
-                        ui.button("Set", on_click=self.set_focus_btn)
-
-                    with ui.column():
-                        with ui.grid(columns=3):
-                            ui.label()
-                            ui.button("N", on_click=self.offset_north_btn)
-                            ui.label()
-                            ui.button("E", on_click=self.offset_east_btn)
-                            ToggleButton("K", keyboard=keyboard)
-                            print("Keyboard active:", keyboard.active)
-                            ui.button("W", on_click=self.offset_west_btn)
-                            ui.label()
-                    with ui.column():
-                        self.show_aladin()
-                # with ui.row(align_items="center"):
-                ui.separator()
-            with ui.tab_panel("Rotator"):
-                with ui.row():
-                    ui.input("Current PA:").bind_value(self, "current_pa").props(
-                        "readonly"
-                    )
-                    ui.input("Offset PA:", on_change=self.set_pa_offset).bind_value(
-                        self, "offset_pa"
-                    )
-                    ui.button("Grab Stars", on_click=self.grab_stars_btn)
-                    ui.button("Grab Pixels", on_click=self.grab_pixels_btn)
-                with ui.row():
-                    ui.button("Move", on_click=self.move_btn)
-            with ui.tab_panel("Henrietta"):
-                ui.label("TODO:  henrietta controls here")
-
-            with ui.tab_panel("Dome"):
-                ui.label("Slit:")
-                ui.label("Azimuth:")
-                ui.label("Wind screen:")
-
-            with ui.tab_panel("Scheduler"):
-                with ui.grid(columns=2):
-                    ui.upload(
-                        on_upload=self.upload_sched_file, auto_upload=True, max_files=1
-                    )  # .classes('max-w-full').classes('no-wrap')
-                    with ui.button_group():
-                        ui.button(
-                            "Load file",
-                            on_click=lambda: self.run_subprocess(
-                                "--new -f /tmp/sched.yaml"
-                            ),
-                            color="blue",
-                        )
-                        ui.button(
-                            "Start",
-                            on_click=lambda: self.run_subprocess("--start"),
-                            color="green",
-                        )
-                        ui.button(
-                            "Stop",
-                            on_click=lambda: self.run_subprocess("--stop"),
-                            color="red",
-                        )
-                        ui.button(
-                            "Monitor",
-                            on_click=lambda: self.run_subprocess("--monitor"),
-                            color="blue",
-                        )
-                self.terminal = ui.xterm({"cols": 120, "rows": 40, "convertEol": True})
-                self.terminal.on_bell(lambda: ui.notify("🔔 scheduler 🔔"))
-
-            with ui.tab_panel("Settings"):
-                ui.label("Alert Sounds:")
-                # self.audio = ui.audio('https://cdn.pixabay.com/download/audio/2022/02/22/audio_d1718ab41b.mp3')
-                self.audio = ui.audio(
-                    "https://cdn.pixabay.com/download/audio/2025/06/11/audio_e064a2fc07.mp3"
-                )  # ?filename=airbus-cabin-pa-beep-tone-passenger-announcement-chime-358248.mp3
-                ui.button(
-                    on_click=lambda: self.audio.props("muted"), icon="volume_off"
-                ).props("outline")
-                ui.button(
-                    on_click=lambda: self.audio.props(remove="muted"), icon="volume_up"
-                ).props("outline")
-                # todo: audio volume control button toggle mute/unmute
-
-        ui.separator()
-        ui.button("Release", on_click=self.release_operator)
-
-    def show_aladin(self):
+    def tel_aladin_show():
         ui.add_body_html(
             "<script src='https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js' charset='utf-8'></script>"
         )
@@ -400,20 +317,17 @@ class UiData:
             .props('id="aladin-lite-div"')
             .style("width: 400px; height: 400px;")
         )
-        self.aladin = aladin_div
-        self.update_aladin()
-        ui.button("Update", on_click=self.update_aladin)
+        state["aladin"] = aladin_div
+        tel_aladin_update()
+        ui.button("Update", on_click=tel_aladin_update)
         return aladin_div
-        ui.button("Update", on_click=self.update_aladin)
 
-    def update_aladin(self, ra=None, dec=None, draw_footprint=False):
-        self.update_telescope_coordinates()
-        # if ra is None or dec is None:
-        #     print("current ra, dec:", self.current_ra, self.current_dec)
-        ra = self.current_ra * 15  # convert RA from hours to degrees
-        dec = self.current_dec
+    def tel_aladin_update(ra=None, dec=None, draw_footprint=False):
+        tel_update_coordinates()
+        ra = state["current_ra"] * 15  # convert RA from hours to degrees
+        dec = state["current_dec"]
 
-        with self.aladin:
+        with state["aladin"]:
             ui.run_javascript(
                 f"""
                 aladin = A.aladin('#aladin-lite-div', {{
@@ -424,7 +338,6 @@ class UiData:
             )
 
             if draw_footprint:
-                # ccd_dims = 4096 * 0.435 / 3600, 4112 * 0.435 / 3600 # degrees
                 ccd_dims = 4096 * 0.435 / 3600, 4096 * 0.435 / 3600  # degrees
                 ccd_footprint = [
                     [ra - ccd_dims[0] / 2, dec - ccd_dims[1] / 2],
@@ -441,30 +354,160 @@ class UiData:
                 """
                 )
 
+    @ui.page("/")
+    def page():
+        """Main page definition."""
+        update_proxy_data()
+        keyboard = ui.keyboard(on_key=tel_handle_key_input)
 
-def start_bus():
-    global bus
-    print("Starting bus...")
-    pool = ThreadPoolExecutor()
-    random_port = random.randint(10000, 60000)
-    bus = Bus(f"tcp://127.0.0.1:{random_port}")
-    pool.submit(bus.run_forever)
+        tweet.subscribe(tweet_handler)
+
+        with ui.tabs().classes("w-full") as tabs:
+            if proxies["telescope"]:
+                ui.tab("Telescope")
+            if proxies["rotator"]:
+                ui.tab("Rotator")
+            ui.tab("Henrietta")
+            ui.tab("Scheduler")
+            if proxies["dome"]:
+                ui.tab("Dome")
+            ui.tab("Settings", label="", icon="settings")
+
+        # Determine first available tab
+        first_tab = None
+        if proxies["telescope"]:
+            first_tab = "Telescope"
+        elif proxies["rotator"]:
+            first_tab = "Rotator"
+        else:
+            first_tab = "Henrietta"
+
+        with ui.tab_panels(tabs, value=first_tab, animated=False).classes("w-full"):
+            if proxies["telescope"]:
+                with ui.tab_panel("Telescope"):
+                    with ui.grid(columns=3):
+                        with ui.column():
+                            ui.input(
+                                "Telescope RA:", value=state["current_ra_str"]
+                            ).bind_value(state, "current_ra_str").props("readonly")
+                            ui.input(
+                                "Telescope Dec:", value=state["current_dec_str"]
+                            ).bind_value(state, "current_dec_str").props("readonly")
+
+                            focusser_update()
+                            ui.input(
+                                "Focus:",
+                                value=state["current_focus"],
+                                validation={
+                                    "Out of range": lambda v: state["focus_min"]
+                                    <= float(v)
+                                    <= state["focus_max"]
+                                },
+                                on_change=lambda e: state.update(
+                                    {"target_focus": e.value}
+                                ),
+                            ).bind_value(state, "current_focus")
+                            ui.button("Set", on_click=focuser_set_btn)
+
+                        with ui.column():
+                            with ui.grid(columns=3):
+                                ui.label()
+                                ui.button("N", on_click=tel_offset_north)
+                                ui.label()
+                                ui.button("E", on_click=tel_offset_east)
+                                ToggleButton("K", keyboard=keyboard)
+                                print("Keyboard active:", keyboard.active)
+                                ui.button("W", on_click=tel_offset_west)
+                                ui.label()
+                                ui.button("S", on_click=tel_offset_south)
+                        with ui.column():
+                            tel_aladin_show()
+                    ui.separator()
+
+            if proxies["rotator"]:
+                with ui.tab_panel("Rotator"):
+                    with ui.row():
+                        ui.input("Current PA:", value=state["current_pa"]).bind_value(
+                            state, "current_pa"
+                        ).props("readonly")
+                        ui.input(
+                            "Offset PA:",
+                            value=state["offset_pa"],
+                            on_change=rotator_set_offset,
+                        ).bind_value(state, "offset_pa")
+                        ui.button("Grab Stars", on_click=rotator_grab_stars_btn)
+                        ui.button("Grab Pixels", on_click=rotator_grab_pixels_btn)
+                    with ui.row():
+                        ui.button("Move", on_click=rotator_move_btn)
+
+            if proxies["dome"]:
+                with ui.tab_panel("Dome"):
+                    ui.label("Slit:")
+                    ui.label("Azimuth:")
+                    ui.label("Wind screen:")
+
+            with ui.tab_panel("Henrietta"):
+                ui.label("TODO:  henrietta controls here")
+
+            with ui.tab_panel("Scheduler"):
+                with ui.grid(columns=2):
+                    ui.upload(on_upload=sched_upload, auto_upload=True, max_files=1)
+                    with ui.button_group():
+                        ui.button(
+                            "Load file",
+                            on_click=lambda: sched_run_subprocess(
+                                "--new -f /tmp/sched.yaml"
+                            ),
+                            color="blue",
+                        )
+                        ui.button(
+                            "Start",
+                            on_click=lambda: sched_run_subprocess("--start"),
+                            color="green",
+                        )
+                        ui.button(
+                            "Stop",
+                            on_click=lambda: sched_run_subprocess("--stop"),
+                            color="red",
+                        )
+                        ui.button(
+                            "Monitor",
+                            on_click=lambda: sched_run_subprocess("--monitor"),
+                            color="blue",
+                        )
+                state["terminal"] = ui.xterm(
+                    {"cols": 120, "rows": 40, "convertEol": True}
+                )
+                state["terminal"].on_bell(lambda: ui.notify("🔔 scheduler 🔔"))
+
+            with ui.tab_panel("Settings"):
+                ui.label("Alert Sounds:")
+                state["audio"] = ui.audio(
+                    "https://cdn.pixabay.com/download/audio/2025/06/11/audio_e064a2fc07.mp3"
+                )
+                ui.button(
+                    on_click=lambda: state["audio"].props("muted"), icon="volume_off"
+                ).props("outline")
+                ui.button(
+                    on_click=lambda: state["audio"].props(remove="muted"),
+                    icon="volume_up",
+                ).props("outline")
+
+        ui.separator()
+        ui.button("Release", on_click=release_operator)
+
+    # Start periodic updates
+    app.timer(2, update_proxy_data)
 
 
-def on_startup():
-    global data
-    start_bus()
+# All the setup is only done when the server starts, following the nicegui pattern
+app.on_startup(setup)
 
-
-app.on_startup(on_startup)
-
-data = UiData()
 ui.run(
-    data.root,
     host="0.0.0.0",
     native=True,
     title="Henrietta Swope",
     fullscreen=True,
     dark=True,
-    reload=False,
+    reload=True,
 )
