@@ -1,9 +1,12 @@
 import asyncio
+import os
 import random
 import time
 from concurrent.futures.thread import ThreadPoolExecutor
 
 from chimera.core.bus import Bus
+from chimera.core.chimera_config import ChimeraConfig
+from chimera.core.constants import CHIMERA_CONFIG_DEFAULT_FILENAME, INSTRUMENT_CLASSES
 from chimera.core.proxy import Proxy
 from chimera.util.coord import Coord
 from nicegui import Event, app, run, ui
@@ -45,6 +48,8 @@ def setup() -> None:
         "current_dec": 0.0,
         "current_ra_str": "",
         "current_dec_str": "",
+        "current_lst_str": "",
+        "current_ut_str": "",
         "current_focus": 0.0,
         "target_focus": 0.0,
         "current_rotator": 0.0,
@@ -59,16 +64,6 @@ def setup() -> None:
 
     tweet = Event[str]()
 
-    # Initialize proxies
-    proxies = {
-        "display": None,
-        "rotator": None,
-        "telescope": None,
-        "focuser": None,
-        "operator": None,
-        "dome": None,
-    }
-
     # Create bus
     print("Starting bus...")
     pool = ThreadPoolExecutor()
@@ -76,41 +71,72 @@ def setup() -> None:
     bus = Bus(f"tcp://127.0.0.1:{random_port}")
     pool.submit(bus.run_forever)
 
-    # Try to connect to each proxy
-    try:
-        proxies["rotator"] = Proxy("tcp://127.0.0.1:6379/FakeRotator/rotator", bus)
-        proxies["rotator"].ping()
-    except Exception as e:
-        print(f"Could not connect to rotator: {e}")
-        proxies["rotator"] = None
+    # Load configuration
+    config_path = os.getenv("CHIMERA_CONFIG", CHIMERA_CONFIG_DEFAULT_FILENAME)
+    print(f"Loading configuration from: {config_path}")
+    cfg = ChimeraConfig.from_file(config_path)
 
-    try:
-        proxies["telescope"] = Proxy("tcp://127.0.0.1:6379/FakeTelescope/swope", bus)
-        proxies["telescope"].ping()
-    except Exception as e:
-        print(f"Could not connect to telescope: {e}")
-        proxies["telescope"] = None
+    # Initialize proxy lists for each instrument class
+    proxies = {cls.lower(): [] for cls in INSTRUMENT_CLASSES}
+    proxies["display"] = []
+    proxies["operator"] = []
+    proxies["site"] = Proxy(next(iter(cfg.sites.keys())), bus)
 
-    try:
-        proxies["focuser"] = Proxy("tcp://127.0.0.1:6379/SwopeFocuser/focus", bus)
-        proxies["focuser"].ping()
-        state["focus_min"], state["focus_max"] = proxies["focuser"].get_range()
-        print("Focuser range:", state["focus_min"], state["focus_max"])
-    except Exception as e:
-        print(f"Could not connect to focuser: {e}")
-        proxies["focuser"] = None
+    # Connect to instruments from config
+    print("Connecting to instruments...")
+    for instrument in cfg.instruments.keys():
+        try:
+            proxy = Proxy(instrument, bus)
+            # Try to ping the proxy to see if it's reachable
+            try:
+                proxy.ping()
+                print(f"✓ Connected to {instrument}")
 
-    # try:
-    #     proxies["display"] = Proxy("tcp://127.0.0.1:6379/Ds9AutoDisplay/display", bus)
-    #     proxies["display"].update_pa += update_pa_offset
-    # except Exception as e:
-    #     print(f"Could not connect to display: {e}")
+                # Categorize proxy by its features
+                categorized = False
+                for cls in INSTRUMENT_CLASSES:
+                    if proxy.features(cls):
+                        proxies[cls.lower()].append(proxy)
+                        categorized = True
+                        break
 
-    # try:
-    #     proxies["operator"] = Proxy("tcp://127.0.0.1:6379/TelescopeOperator/operator", bus)
-    #     proxies["operator"].notify += operator_request
-    # except Exception as e:
-    #     print(f"Could not connect to operator: {e}")
+                if not categorized:
+                    print(
+                        f"  Warning: {instrument} does not match any known instrument class"
+                    )
+
+            except Exception as e:
+                print(f"✗ Could not reach {instrument}: {e}")
+
+        except Exception as e:
+            print(f"✗ Could not connect to {instrument}: {e}")
+
+    # # Try to connect to controllers
+    # for controller in cfg.controllers.keys():
+    #     try:
+    #         proxy = Proxy(controller, bus)
+    #         try:
+    #             proxy.ping()
+    #             print(f"✓ Connected to controller {controller}")
+
+    #             # Check if it's a display or operator and add to proxies
+    #             if "display" in controller.lower():
+    #                 proxies["display"].append(proxy)
+    #             elif "operator" in controller.lower():
+    #                 proxies["operator"].append(proxy)
+
+    #         except Exception as e:
+    #             print(f"✗ Could not reach controller {controller}: {e}")
+    #     except Exception as e:
+    #         print(f"✗ Could not connect to controller {controller}: {e}")
+
+    # Set focus range if focuser is available
+    if proxies["focuser"]:
+        try:
+            state["focus_min"], state["focus_max"] = proxies["focuser"][0].get_range()
+            print(f"Focuser range: {state['focus_min']} - {state['focus_max']}")
+        except Exception as e:
+            print(f"Could not get focuser range: {e}")
 
     # Telescope methods
     def tel_slew_complete(ra=None, dec=None, status=None):
@@ -120,8 +146,8 @@ def setup() -> None:
     def tel_update_coordinates():
         if not proxies["telescope"]:
             return
-        state["current_ra"], state["current_dec"] = proxies[
-            "telescope"
+        state["current_ra"], state["current_dec"] = proxies["telescope"][
+            0
         ].get_position_ra_dec()
 
         # fixme: this should not be necessary: chimera bug
@@ -134,40 +160,44 @@ def setup() -> None:
         state["current_ra_str"] = Coord.from_d(float(state["current_ra"])).strfcoord()
         state["current_dec_str"] = Coord.from_d(float(state["current_dec"])).strfcoord()
 
+    def site_update_time():
+        state["current_ut_str"] = proxies["site"].ut().split(".")[0].replace("T", " ")
+        state["current_lst_str"] = proxies["site"].lst()
+
     def tel_offset_north():
         if not proxies["telescope"]:
             return
-        proxies["telescope"].move_north(1)
+        proxies["telescope"][0].move_north(1)
         tel_update_coordinates()
 
     def tel_offset_south():
         if not proxies["telescope"]:
             return
-        proxies["telescope"].move_south(1)
+        proxies["telescope"][0].move_south(1)
         tel_update_coordinates()
 
     def tel_offset_east():
         if not proxies["telescope"]:
             return
-        proxies["telescope"].move_east(1)
+        proxies["telescope"][0].move_east(1)
         tel_update_coordinates()
 
     def tel_offset_west():
         if not proxies["telescope"]:
             return
-        proxies["telescope"].move_west(1)
+        proxies["telescope"][0].move_west(1)
         tel_update_coordinates()
 
     # Chimera callbacks
     if proxies["telescope"]:
-        proxies["telescope"].slew_complete += tel_slew_complete
+        proxies["telescope"][0].slew_complete += tel_slew_complete
 
     def update_rotator(*args, **kwargs):
         """Callback for rotator slew complete."""
         pass
 
     if proxies["rotator"]:
-        proxies["rotator"].slew_complete += update_rotator
+        proxies["rotator"][0].slew_complete += update_rotator
 
     # Data update methods
     def update_proxy_data():
@@ -175,13 +205,14 @@ def setup() -> None:
             return
         state["last_update"] = time.time()
         tel_update_coordinates()
-        focusser_update()
+        focuser_update()
+        site_update_time()
 
-    def focusser_update():
+    def focuser_update():
         if proxies["focuser"]:
-            state["current_focus"] = proxies["focuser"].get_position()
+            state["current_focus"] = proxies["focuser"][0].get_position()
         if proxies["rotator"]:
-            state["current_rotator"] = proxies["rotator"].get_position()
+            state["current_rotator"] = proxies["rotator"][0].get_position()
             state["current_pa"] = f"{state['current_rotator']:.3f}º"
 
     def operator_request(type, msg):
@@ -201,12 +232,14 @@ def setup() -> None:
         """Get PA from DS9 display - can be run in cpu_bound context."""
         if not proxies["display"]:
             try:
-                proxies["display"] = Proxy("127.0.0.1:6379/Ds9AutoDisplay/display", bus)
+                proxy = Proxy("127.0.0.1:6379/Ds9AutoDisplay/display", bus)
+                proxy.ping()
+                proxies["display"].append(proxy)
             except Exception as e:
                 ui.notify(f"Error connecting to DS9: {e}")
                 return
         try:
-            print(proxies["display"].get_pa(detect_stars=detect_stars))
+            print(proxies["display"][0].get_pa(detect_stars=detect_stars))
         except Exception as e:
             ui.notify(f"Error getting PA from DS9: {e}")
             return
@@ -218,17 +251,17 @@ def setup() -> None:
             return
         try:
             print(f"Setting focus to {state['target_focus']}")
-            proxies["focuser"].move_to(int(state["target_focus"]))
+            proxies["focuser"][0].move_to(int(state["target_focus"]))
         except Exception as e:
             ui.notify(f"Error setting focus: {e}")
-        focusser_update()
+        focuser_update()
 
     def rotator_move_btn():
         if not proxies["rotator"]:
             ui.notify("Rotator not connected")
             return
         ui.notify(f"Offsetting rotator by {state['offset_pa']:.3f}º")
-        proxies["rotator"].move_by(state["offset_pa"])
+        proxies["rotator"][0].move_by(state["offset_pa"])
         state["offset_pa"] = 0.0
         rotator_offset_update(state["offset_pa"])
 
@@ -268,7 +301,7 @@ def setup() -> None:
             "chimera-sched",
             *args,
             "--config",
-            "/Users/william/workspace/chimera/chimera-swope/etc/chimera.config",  # fixme
+            config_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -306,7 +339,7 @@ def setup() -> None:
 
     def release_operator():
         if proxies["operator"]:
-            proxies["operator"].release()
+            proxies["operator"][0].release()
 
     def tel_aladin_show():
         ui.add_body_html(
@@ -388,13 +421,18 @@ def setup() -> None:
                     with ui.grid(columns=3):
                         with ui.column():
                             ui.input(
+                                "Universal Time:", value=state["current_ut_str"]
+                            ).bind_value(state, "current_ut_str").props("readonly")
+                            ui.input(
+                                "Local Sidereal Time:", value=state["current_lst_str"]
+                            ).bind_value(state, "current_lst_str").props("readonly")
+                            ui.input(
                                 "Telescope RA:", value=state["current_ra_str"]
                             ).bind_value(state, "current_ra_str").props("readonly")
                             ui.input(
                                 "Telescope Dec:", value=state["current_dec_str"]
                             ).bind_value(state, "current_dec_str").props("readonly")
 
-                            focusser_update()
                             ui.input(
                                 "Focus:",
                                 value=state["current_focus"],
@@ -493,11 +531,14 @@ def setup() -> None:
                     icon="volume_up",
                 ).props("outline")
 
-        ui.separator()
-        ui.button("Release", on_click=release_operator)
+        # ui.separator()
+        # ui.button("Release", on_click=release_operator)
+
+        with ui.footer():
+            ui.label("This is a label at the bottom of the page.")
 
     # Start periodic updates
-    app.timer(2, update_proxy_data)
+    app.timer(1, update_proxy_data)
 
 
 # All the setup is only done when the server starts, following the nicegui pattern
@@ -505,9 +546,9 @@ app.on_startup(setup)
 
 ui.run(
     host="0.0.0.0",
-    native=True,
+    # native=True,
     title="Henrietta Swope",
-    fullscreen=True,
+    # fullscreen=True,
     dark=True,
     reload=True,
 )
