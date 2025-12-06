@@ -1,5 +1,6 @@
 import datetime as dt
 import os
+import plistlib
 import time
 
 from astropy.io import fits
@@ -26,6 +27,17 @@ class SwopeCamera(CameraBase, FilterWheelBase):
     }
 
     def __init__(self):
+        # Configure filters
+        with open(
+            "/Users/Shared/Library/Preferences/edu.carnegiescience.obs.Swope.plist",
+            "rb",
+        ) as f:
+            plist_data = plistlib.load(f)
+        filters = list(set(plist_data["filterNames"]))
+        filters.pop(0)  # remove 0.0 filter
+        assert len(filters) == 11  # expected number of filters
+        self.__config__["filters"] = " ".join(filters)
+
         CameraBase.__init__(self)
 
         # Define supported ADCs and binnings
