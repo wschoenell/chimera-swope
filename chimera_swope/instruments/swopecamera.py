@@ -17,9 +17,6 @@ class SwopeCamera(CameraBase, FilterWheelBase):
     __config__ = {
         "swope_ccd_host": "127.0.0.1",
         "swope_ccd_port": 51911,
-        "fits_links": ",".join(
-            [os.path.expanduser(f"~/ccdc{f}.fits") for f in (1, 2, 3, 4)]
-        ),
         "ccd_width": 2056 * 2,
         "ccd_height": 2048 * 2,
         "pixel_size_x": 15.0,
@@ -27,6 +24,8 @@ class SwopeCamera(CameraBase, FilterWheelBase):
     }
 
     def __init__(self):
+        CameraBase.__init__(self)
+
         # Configure filters
         with open(
             "/Users/Shared/Library/Preferences/edu.carnegiescience.obs.Swope.plist",
@@ -36,9 +35,7 @@ class SwopeCamera(CameraBase, FilterWheelBase):
         filters = list(set(plist_data["filterNames"]))
         filters.pop(0)  # remove 0.0 filter
         assert len(filters) == 11  # expected number of filters
-        self.__config__["filters"] = " ".join(filters)
-
-        CameraBase.__init__(self)
+        self["filters"] = " ".join(filters)
 
         # Define supported ADCs and binnings
         self._my_adc = 1 << 2
@@ -67,7 +64,18 @@ class SwopeCamera(CameraBase, FilterWheelBase):
         self.swope_ccd.open()
         self.__last_frame_start = 0
 
-        self._links = [link.strip() for link in self["fits_links"].split(",")]
+    def get_datapath(self):
+        # Configure file paths
+        with open(
+            "/Users/Shared/Library/Preferences/edu.carnegiescience.obs.Swope.plist",
+            "rb",
+        ) as f:
+            plist_data = plistlib.load(f)
+        return plist_data["dbe_datapath1"]
+
+    def get_fits_links(self):
+        data_path = self.get_datapath()
+        return [os.path.join(data_path, f"ccdc{f}.fits") for f in (1, 2, 3, 4)]
 
     def get_binnings(self):
         return self._binnings
@@ -110,16 +118,11 @@ class SwopeCamera(CameraBase, FilterWheelBase):
     def _readout(self, image_request: ImageRequest):
         self.readout_begin(image_request)
 
-        array_4, header_4 = fits.getdata(
-            os.path.expanduser(self._links[0]), header=True
-        )
-        array_3, header_3 = fits.getdata(
-            os.path.expanduser(self._links[1]), header=True
-        )
-        array_2, header_2 = fits.getdata(
-            os.path.expanduser(self._links[2]), header=True
-        )
-        array_1, header = fits.getdata(os.path.expanduser(self._links[3]), header=True)
+        links = self.get_fits_links()
+        array_4, header_4 = fits.getdata(os.path.expanduser(links[0]), header=True)
+        array_3, header_3 = fits.getdata(os.path.expanduser(links[1]), header=True)
+        array_2, header_2 = fits.getdata(os.path.expanduser(links[2]), header=True)
+        array_1, header = fits.getdata(os.path.expanduser(links[3]), header=True)
 
         pix = concatenate_quad_arrays(
             array_4, array_3, array_2, array_1, header=header, trim_data=True
@@ -141,6 +144,7 @@ class SwopeCamera(CameraBase, FilterWheelBase):
             "NAXIS1",
             "NAXIS2",
             "EXTEND",
+            "OBJECT",
         ]:
             header.pop(kw, None)
             # fixme: ENOISE removed above to match other headers
