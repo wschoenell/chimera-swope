@@ -417,7 +417,7 @@ class SwopeWeatherStation(
         """
         return self._fetch_data(
             url_config_key="swope_seeing_host",
-            time_window_minutes=30,
+            time_window_minutes=24 * 60,  # 24 hours
             data_type="seeing",
             status_attr="_seeing_status",
             last_update_attr="_seeing_last_update",
