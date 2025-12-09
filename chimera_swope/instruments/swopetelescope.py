@@ -65,7 +65,9 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     def set_offset(self, ha: float, dec: float):
         self.slew_begin(self.get_ra(), self.get_dec())
         self.tcs.set_offset(ha, dec)
-        self.status(force=True)
+        self.get_status(force=True)
+        while self.is_slewing():
+            time.sleep(0.01)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
     def move_east(self, offset, rate=None):
@@ -84,7 +86,8 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         self.slew_begin(self.get_ra(), self.get_dec())  # , 2000)
         self.tcs.set_nextobj(ra, dec, 2000)
         self.tcs.set_slew()
-        self.status(force=True)
+        time.sleep(1) # wait for slew to start
+        self.get_status(force=True)
         while self.is_slewing():
             time.sleep(0.01)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
@@ -106,6 +109,9 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     #       park_complete()
     def unpark(self):
         self.tcs.set_poweron(True)
+        self.get_status(force=True)
+        while not self.is_parked():
+            time.sleep(0.1)
 
     def is_parked(self):
         return self.status["Init_done"]

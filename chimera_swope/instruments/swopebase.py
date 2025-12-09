@@ -15,6 +15,9 @@ class SwopeBase:
 
     @property
     def status(self, force=False):
+        return self.get_status(force=force)
+    
+    def get_status(self, force=False):
         if (
             not force
             and self._last_update is not None
