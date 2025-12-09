@@ -1,3 +1,5 @@
+import time
+
 from chimera.instruments.focuser import FocuserBase
 from chimera.interfaces.focuser import FocuserAxis, InvalidFocusPositionException
 
@@ -36,8 +38,14 @@ class SwopeFocuser(FocuserBase, SwopeBase):
             raise InvalidFocusPositionException(
                 f"Position {position} out of range {limits} for axis {axis}"
             )
-        print(f"Moving focuser to position {position}")
-        return self.tcs.set_focus(position)
+        self.tcs.set_focus(position)
+        time.sleep(1.0)  # give time to start moving
+        while self.is_moving():
+            time.sleep(0.1)
+        return True
+
+    def is_moving(self, axis=FocuserAxis.Z):
+        return self.get_status(force=True)["FocusMoving"]
 
     def get_range(self, axis=FocuserAxis.Z):
         return 20000, 28000
