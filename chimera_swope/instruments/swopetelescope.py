@@ -1,13 +1,12 @@
 import time
 
-from chimera.instruments.fan import FanBase
 from chimera.instruments.telescope import TelescopeBase
 from chimera.interfaces.telescope import TelescopeStatus
 
 from chimera_swope.instruments.swopebase import SwopeBase
 
 
-class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
+class SwopeTelescope(TelescopeBase, SwopeBase):
     __config__ = {
         "tcs_host": "127.0.0.1",
         "model": "Henrietta Swope Telescope",
@@ -20,7 +19,6 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
 
     def __init__(self):
         TelescopeBase.__init__(self)
-        FanBase.__init__(self)
         SwopeBase.__init__(self)
 
     def __start__(self):
@@ -33,7 +31,7 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         return self.status["Azi"]
 
     def get_ra(self):
-        return self.status["RA_ICRS"]
+        return self.status["RA_ICRS"] / 15.0
 
     def get_dec(self):
         return self.status["Dec_ICRS"]
@@ -63,7 +61,7 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         return ret
 
     def set_offset(self, ha: float, dec: float):
-        self.slew_begin(self.get_ra(), self.get_dec())
+        self.slew_begin(self.get_ra() + ha, self.get_dec() + dec, 2000)
         self.tcs.set_offset(ha, dec)
         self.get_status(force=True)
         while self.is_slewing():
@@ -83,20 +81,25 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
         self.set_offset(0, -offset)
 
     def slew_to_ra_dec(self, ra: float, dec: float, epoch=None):
-        self.slew_begin(self.get_ra(), self.get_dec())  # , 2000)
-        self.tcs.set_nextobj(ra, dec, 2000)
+        self.slew_begin(ra, dec, epoch)
+        self.tcs.set_nextobj(15 * ra, dec, 2000.0)
+        time.sleep(2)  # wait for TCS to process
         self.tcs.set_slew()
-        time.sleep(1) # wait for slew to start
+        time.sleep(1)  # wait for slew to start
         self.get_status(force=True)
         while self.is_slewing():
             time.sleep(0.01)
         self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
 
+    def _get_site(self):
+        # FIXME: create the proxy directly and cache it
+        return self.get_proxy("/Site/0")
+
     def slew_to_alt_az(self, alt: float, az: float):
-        self.slew_begin(self.get_ra(), self.get_dec(), 2000)
-        # TODO slew
-        self.status(force=True)
-        self.slew_complete(self.get_ra(), self.get_dec(), TelescopeStatus.OK)
+        self._validate_alt_az(alt, az)
+        ra, dec = self._get_site().alt_az_to_ra_dec(alt, az)
+        self.slew_to_ra_dec(ra, dec, epoch=2000)
+        self.stop_tracking()
 
     def abort_slew(self):
         self.tcs.set_slew_stop()
@@ -105,8 +108,14 @@ class SwopeTelescope(TelescopeBase, FanBase, SwopeBase):
     # TD def get_target_alt_az(self):
     # TD def sync_ra_dec(self, ra, dec, epoch=2000): -> CSET?
     #           sync_complete(self, ra: float, dec: float)
-    # TD def park(self):
-    #       park_complete()
+
+    def sync_ra_dec(self, ra: float, dec: float, epoch=2000):
+        return self.tcs.set_cset()
+
+    def park(self):
+        self.tcs.set_poweron(False)
+        self.park_complete()
+
     def unpark(self):
         self.tcs.set_poweron(True)
         self.get_status(force=True)
