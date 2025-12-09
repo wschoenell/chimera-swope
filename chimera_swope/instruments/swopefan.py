@@ -10,6 +10,9 @@ class SwopeFan(FanBase, SwopeBase):
         FanBase.__init__(self)
         SwopeBase.__init__(self)
 
+    def __start__(self):
+        SwopeBase.__start__(self)
+
     # fan control
     def switch_on(self):
         return self.tcs.set_tubefans(True)
